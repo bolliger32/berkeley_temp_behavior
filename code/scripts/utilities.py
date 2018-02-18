@@ -1,9 +1,10 @@
 import pandas as pd
-from os.path import join
+from os.path import join, isfile
 from os import listdir
 from datetime import datetime as dt, time, timedelta
 import numpy as np
 from glob import glob
+import warnings
 
 ## def variables
 class Settings:
@@ -121,20 +122,37 @@ def load_vals_bus(s):
 
     # grab room temp data from both control and treatment rooms
     for gi,gx in enumerate([('Cool','control'),('Warm','treatment')]):
-        
         ga = gx[0]
         g = gx[1]
         tx_lab = ga[0].upper()
+        
+        
+        print('Downloading {} room data...'.format(g))
 
         this_df = dfs['indoor'][g] = {}
         
         ## now download data from sensors we switched to
         for dx,d in enumerate(download_dates):
             d_str = d.strftime('%Y%m%d')
+            print('Downloading {}...'.format(d_str))
+            
             for loc in [('far','F'),('near','N')]:
-                file = glob(join(s.bus.temps_dir,'indoor','{}_{}'.format(d_str,ga),
-                        '{}_Temp_{}{}.*csv'.format(d_str,tx_lab,loc[1])))[0]
-                new_df = pd.read_csv(file,usecols=[1,2,3],header=1,
+                print('Downloading {} sensor...'.format(loc[0]))
+                
+                # need to use glob because some files have two "."s and some have one
+                fname = '{}_Temp_{}{}.*csv'.format(d_str,tx_lab,loc[1])
+                dirname = join(s.bus.temps_dir,'indoor','{}_{}'.format(d_str,ga))
+                fpath = join(dirname, fname)
+                files = glob(fpath)
+                
+                # check for missing files
+                if len(files) != 1:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter('always')
+                        warnings.warn('Missing file: {}'.format(fname))
+                    continue
+                    
+                new_df = pd.read_csv(files[0],usecols=[1,2,3],header=1,
                        index_col=0,parse_dates=True)
                 new_df.columns=['T','RH']
                 new_df.index.name='time'
