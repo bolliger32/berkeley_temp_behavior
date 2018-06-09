@@ -21,20 +21,19 @@ class SiteSettings:
             self.sensor_swap_date = '2017-10-03'
             self.sensor_interval_early = 5
             self.sensor_interval = 1
-            self.temps_dir = join(self.home_dir,'Temperature')
+            self.other_dir = join(self.home_dir,'Other Environmental Vars')
+            self.download_dates_oth = get_download_dates(site, self.other_dir)
             
         elif site == 'bus':
             self.sens_locs = ['near','far']
             self.home_dir = join(home_dir,'Busara data','Main experiment data')
-            self.temps_dir = join(self.home_dir,'Temperature')
-            
             
         else:
             raise NameError(site)
-        
+        self.temps_dir = join(self.home_dir,'Temperature')
         self.timing_fpath = join(self.home_dir,'experiment_timing.csv')
-        self.other_dir = join(self.home_dir,'Other Environmental Vars')
-        self.download_dates = get_download_dates(site, self.temps_dir)
+        self.download_dates = get_download_dates(site, join(self.temps_dir,'indoor'))
+        
 
 #################################
 ## DATA DOWNLOAD FUNCTIONS
@@ -43,13 +42,13 @@ class SiteSettings:
 def get_download_dates(site, temps_dir):
     """Find all dates when data was downloaded from loggers, based on available files."""
 
-    all_files = listdir(join(temps_dir,'indoor'))
+    all_files = listdir(temps_dir)
     if site == 'berk':
-        download_dates = [dt.strptime(i,'%Y%m%d') for i in all_files if i[0] != '.']
+        download_dates = [dt.strptime(i,'%Y%m%d') for i in all_files if (not isfile(join(temps_dir,i))) and (i[0] != '.')]
     elif site == 'bus':
         # only download data from dates where we have room-level sensors
-        valid_dates = [a for a in all_files if glob(join(temps_dir,'indoor',a,'*F.*csv')) != []]
-        
+        valid_dates = [a for a in all_files if glob(join(temps_dir,a,'*F.*csv')) != []]
+
         download_dates = [dt.strptime(i[:-5],'%Y%m%d') for i in valid_dates if i[-4:].lower()=='warm']
         
     download_dates.sort()
@@ -60,23 +59,18 @@ def load_vals_berkeley(s):
     """Input all temperature data from Berkeley experiment into dataframe."""
     
     download_dates = s.berk.download_dates
+    download_dates_oth = s.berk.download_dates_oth
     sensor_swap_date = s.berk.sensor_swap_date
     
     dfs = {'indoor':{}}
-    
-    # co2
-#    dfs['co2'] = load_co2_vals(download_dates,s.berk.home_dir)
     
     # outdoor temp
     dfs['outdoor'] = get_outdoor_data(s.berk.temps_dir,'berk')
     
     # base directory for indoor temp measurements
     indoor_temp_dir = join(s.berk.temps_dir,'indoor')
-    
-    # operative temp
-#    dfs['t_op'] = load_t_op_vals(download_dates,indoor_temp_dir)
 
-    print("Downloading {}...".format(download_dates[0]))
+    print("Downloading temps: {}...".format(download_dates[0]))
     
     # grab room temp data from both control and treatment rooms
     for gi,g in enumerate(['control','treatment']):
@@ -92,22 +86,44 @@ def load_vals_berkeley(s):
         this_df['RA'] = pd.DataFrame(this_df['RA'])
         this_df['RA']['RH'] = np.nan
         
-        for loc in ['partition','RA']:  
+        for loc in ['partition','RA']:
             this_df[loc].columns = ['T','RH']
             this_df[loc].index.name='time'
         
         ## now download data from sensors we switched to
         for d in download_dates[1:]:
-            print("Downloading {}...".format(d))
+            csv_dir = join(indoor_temp_dir,d.strftime('%Y%m%d'),'csvs')
+            print("Downloading temps: {}...".format(d))
             for loc in [('partition','p'),('RA','RA')]:
-                new_df = pd.read_csv(join(indoor_temp_dir,d.strftime('%Y%m%d'),'csvs',
-                        '{}_{}.csv'.format(g,loc[1])),usecols=[1,2,3],header=1,
-                       index_col=0,parse_dates=True).loc[pd.to_datetime(sensor_swap_date):,:]
-                new_df.columns=['T','RH']
-                new_df.index.name='time'
-                this_df[loc[0]] = this_df[loc[0]].append(new_df)
+                fpath = join(csv_dir,'{}_{}.csv'.format(g,loc[1]))
+                this_df = add_file_to_dfs(fpath, this_df, [1,2,3], ['T','RH'], loc[0], sensor_swap = sensor_swap_date)
+                
+            ## add individual temp/RH 
+            for s_ix in range(1,7):
+                if isfile(join(csv_dir,'{}_{}.csv'.format(g,s_ix))):
+                    fpath = join(csv_dir,'{}_{}.csv'.format(g,s_ix))
+                    this_df = add_file_to_dfs(fpath, this_df, [1,2,3], ['T','RH'], str(s_ix))
+                        
+            ## add operative temp
+            if isfile(join(csv_dir,'{}_ot.csv'.format(g))):
+                fpath = join(csv_dir, '{}_ot.csv'.format(g))
+                this_df = add_file_to_dfs(fpath, this_df, [1,4], ['Top'], 'Top')
+                    
+        ## add CO2
+        for d in download_dates_oth:
+            print("Downloading co2: {}...".format(d))
+            csv_dir = join(s.berk.other_dir,d.strftime('%Y%m%d'))
             
-        this_df = drop_duplicates_and_flags(this_df, s.berk)
+            # pass when the file doesn't exist (aka when
+            # the CO2 sensor's batteries died
+            fpath = join(csv_dir,'{}_co2.csv'.format(g))
+            if not isfile(fpath):
+                continue
+                
+            # otherwise, parse
+            this_df = add_file_to_dfs(fpath, this_df, [1,4], ['co2'], 'co2')
+            
+        this_df = drop_duplicates_and_flags(this_df)
         
     return dfs
 
@@ -133,7 +149,9 @@ def load_vals_bus(s):
         
         ## now download data from sensors we switched to
         for dx,d in enumerate(download_dates):
+            
             d_str = d.strftime('%Y%m%d')
+            dirname = join(s.bus.temps_dir,'indoor','{}_{}'.format(d_str,ga))
             print('Downloading {}...'.format(d_str))
             
             for loc in [('far','F'),('near','N')]:
@@ -141,9 +159,9 @@ def load_vals_bus(s):
                 
                 # need to use glob because some files have two "."s and some have one
                 fname = '{}_Temp_{}{}.*csv'.format(d_str,tx_lab,loc[1])
-                dirname = join(s.bus.temps_dir,'indoor','{}_{}'.format(d_str,ga))
                 fpath = join(dirname, fname)
                 files = glob(fpath)
+                fpath = files[0]
                 
                 # check for missing files
                 if len(files) != 1:
@@ -151,27 +169,52 @@ def load_vals_bus(s):
                         warnings.simplefilter('always')
                         warnings.warn('Missing file: {}'.format(fname))
                     continue
+                this_df = add_file_to_dfs(fpath, this_df, [1,2,3], ['T','RH'], loc[0])
                     
-                new_df = pd.read_csv(files[0],usecols=[1,2,3],header=1,
-                       index_col=0,parse_dates=True)
-                new_df.columns=['T','RH']
-                new_df.index.name='time'
-                if dx == 0:
-                    this_df[loc[0]] = new_df
-                else:
-                    this_df[loc[0]] = this_df[loc[0]].append(new_df)
-        this_df = drop_duplicates_and_flags(this_df, s.bus)
+            ## add individual data
+            for s_ix in range(1,7):
+                fname = '{}_Temp_{}{}.csv'.format(d_str,tx_lab,s_ix)
+                fpath = join(dirname, fname)
+                this_df = add_file_to_dfs(fpath, this_df, [1,2,3], ['T','RH'], str(s_ix))
+                    
+            ## add T_operative
+            fname = '{}_PingPong_{}.csv'.format(d_str,ga)
+            fpath = join(dirname, fname)
+            this_df = add_file_to_dfs(fpath, this_df, [1,4], ['Top'], 'Top')
+                
+            ## add CO2
+            fname = '{}_{}_co2.csv'.format(d_str,g)
+            fpath = join(dirname, fname)
+            this_df = add_file_to_dfs(fpath, this_df, [1,4], ['co2'], 'co2')
+
+        this_df = drop_duplicates_and_flags(this_df)
         
     return dfs
 
-def drop_duplicates_and_flags(dfs, siteSettings):
+def add_file_to_dfs(fpath, dfs, cols_to_use, colnames, df_name, header=1, sensor_swap=None):
+    """Load data from file into a dataframe and add it to an existing dictionary of dataframes"""
+    new_df = pd.read_csv(fpath, usecols=cols_to_use, header=header,
+       index_col=0, parse_dates=True)
+    if sensor_swap:
+        new_df = new_df.loc[pd.to_datetime(sensor_swap):,:]
+    new_df.columns = colnames
+    new_df.index.name='time'
+    if df_name in dfs.keys():
+        dfs[df_name] = dfs[df_name].append(new_df)
+    else:
+        dfs[df_name] = new_df
+        
+    return dfs
+    
+    
+def drop_duplicates_and_flags(dfs):
     """After appending indoor temp/RH files together, drop duplicated measurements and logger flag rows."""
-    for loc in siteSettings.sens_locs:
+    for loc in dfs.keys():
         # drop duplicate times from multiple files
         dfs[loc] = dfs[loc][~dfs[loc].index.duplicated(keep='last')].sort_index()
 
         # drop data logger flag rows
-        dfs[loc] = dfs[loc][dfs[loc].notnull().all(axis=1)]
+        dfs[loc] = dfs[loc][dfs[loc].notnull().any(axis=1)]
         
     return dfs
     
