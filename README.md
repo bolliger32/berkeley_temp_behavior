@@ -5,12 +5,12 @@ Almås, I., Auffhammer, M., Bold, T., Bolliger, I., et al., “Destructive Behav
 ```
 
 The following environmentally-related figures and tables are created in this repository:
-- Fig. 2
+- Fig. 1
 - Fig. A.2.1
-- Fig. A.3.1
-- Fig. A.4.1
+- Fig. A.2.2
+<!--TODO: See if these figs are referenced elsewhere - Fig. A.4.1
 - Fig. B.2.1
-- Fig. B.2.2
+- Fig. B.2.2 -->
 
 To ensure replicability, we recommend you create a [conda](https://docs.conda.io/en/latest/miniconda.html) environment to match that used to run this code for the publication. To do so, install [conda](https://docs.conda.io/en/latest/miniconda.html) and run the following from the root directory of this repository:
 
