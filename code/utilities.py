@@ -52,7 +52,7 @@ class SiteSettings:
             site, self.env_dir / "other_env_vars"
         )
         self.env_out_path = (
-            save_dir / f"session_level_environmental_data_{self.loc}.parquet"
+            save_dir / f"session_level_environmental_data_{self.loc}.csv"
         )
 
 
