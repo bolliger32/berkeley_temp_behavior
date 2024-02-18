@@ -103,5 +103,4 @@ ENV/
 # macOS
 .DS_Store
 
-# results
-results/
+.virtual_documents/
